@@ -1,12 +1,11 @@
-# -*- coding: utf-8 -*-
-"""
-Survival Analysis
-Data Source: https://mimic.physionet.org/gettingstarted/access/
 
-This analysis uses variables from multiple datasets. Some of them are re-engineered.
+#Survival Analysis
+#Data Source: https://mimic.physionet.org/gettingstarted/access/
+
+#This analysis uses variables from multiple datasets. Some of them are re-engineered.
 
 
-"""
+
 # Install packages:
 library(dplyr)
 library(ggplot2)
@@ -84,83 +83,74 @@ df3 = df3 %>%
 # If age is greater than 100, code it to 90
 df3$age = ifelse(df3$age > 100, 90, round(df3$age,1))
 
-########################################################################
-###################### SAVE THE DATASET FOR NOW ########################
-########################################################################
-save(df3, file = "Preprocssing.csv")
-
 # Regroup categorical variables:
 # Regroup Marital Status:
-df3$MARITAL_STATUS = case_when(df3$MARITAL_STATUS == 'SINGLE' ~ 'SINGLE',
+df3$MARITAL_STATUS_CAT = case_when(df3$MARITAL_STATUS == 'SINGLE' ~ 'SINGLE',
                                df3$MARITAL_STATUS == 'WIDOWED' ~ 'WIDOWED',
-                               df3$MARITAL_STATUS %in% c('MARRIED', 'LIFE PARTNER') ~ 'MARRIED'
+                               df3$MARITAL_STATUS %in% c('MARRIED', 'LIFE PARTNER') ~ 'MARRIED',
                                df3$MARITAL_STATUS %in% c('DIVORCED','SEPARATED') ~ 'DIVORCED',
-                               TRUE                      ~  "OTHER")
+                               TRUE                      ~  'UNKNOWN')
+df3$MARITAL_STATUS_CAT = as.factor(df3$MARITAL_STATUS_CAT)
 
 # Regroup Ethnicity:
-df3$ETHNICITY_Cat = case_when(str_detect(df3$ETHNICITY, 'WHITE') ~ 'WHITE',
+df3$ETHNICITY_CAT = case_when(str_detect(df3$ETHNICITY, 'WHITE') ~ 'WHITE',
                           str_detect(df3$ETHNICITY, 'BLACK') ~ 'BLACK',
                           str_detect(df3$ETHNICITY, 'HISPANIC') ~ 'HISPANIC',
                           str_detect(df3$ETHNICITY, 'ASIAN') ~ 'ASIAN',
                           df3$ETHNICITY %in% c('UNKNOWN/NOT SPECIFIED','UNABLE TO OBTAIN','PATIENT DECLINED TO ANSWER') ~ 'UNKNOWN',
                           TRUE ~ 'OTHER')
-
-df3['ETHNICITY'] = ['WHITE' if 'WHITE' in x 
-                    else 'BLACK' if 'BLACK' in x 
-                    else 'HISPANIC' if 'HISPANIC' in x
-                    else 'UNKNOWN' if x in ('UNKNOWN/NOT SPECIFIED','UNABLE TO OBTAIN','PATIENT DECLINED TO ANSWER')
-                    else 'ASIAN' if 'ASIAN' in x 
-                    else 'OTHER' for x in df3['ETHNICITY']]
+df3$ETHNICITY_CAT = as.factor(df3$ETHNICITY_CAT)
 
 # Regroup Discharge Location:
-df3['DISCHARGE_LOCATION_2']=['SNF' if 'SNF' in x else 'HOSPICE' if 'HOSPICE' in x 
-                             else 'HOME HEALTH CARE' if x in ('HOME HEALTH CARE','HOME WITH HOME IV PROVIDER')
-                             else x if x in ('HOME','REHAB/DISTINCT PART HOSP','LONG TERM CARE HOSPITAL')
-                             else 'OTHER' for x in df3['DISCHARGE_LOCATION']]
+df3$DISCH_LOC_CAT = case_when(str_detect(df3$DISCHARGE_LOCATION, 'HOSPICE') ~ 'HOSPICE',
+                              str_detect(df3$DISCHARGE_LOCATION, 'SNF') ~ 'SNF',
+                              df3$DISCHARGE_LOCATION %in% c('HOME HEALTH CARE','HOME WITH HOME IV PROVIDER') ~ 'HOME HEALTH CARE',
+                              df3$DISCHARGE_LOCATION %in% c('HOME','REHAB/DISTINCT PART HOSP','LONG TERM CARE HOSPITAL') ~ df3$DISCHARGE_LOCATION,
+                              TRUE ~ 'OTHER')
+df3$DISCH_LOC_CAT = as.factor(df3$DISCH_LOC_CAT)
 
-# Regroup Language:
-df3['LANGUAGE_CATEGORY'] = ['ENGL' if x =='ENGL' else 'SPAN' if x=='SPAN' 
-                            else 'MISSING' if pd.isnull(x)
-                            else 'OTHER' for x in df3['LANGUAGE']]
+
 
 # Remove those that were discharged to hospice related locations
-df3 = df3[df3['DISCHARGE_LOCATION_2']!='HOSPICE']
+df3 = filter(df3, DISCH_LOC_CAT != 'HOSPICE')
 
 # Remove those who are under the age of 18:
-df_adults = df3[df3['AGE_AT_DISCH']>=18]
+df_adults = filter(df3, age >= 18)
+
+# Regroup insurance:
+df_adults$INSURANCE_CAT = ifelse(df_adults$INSURANCE %in% c("Government","Medicaid","Medicare","Private"), 
+                                 df_adults$INSURANCE, 'Private')
+df_adults$INSURANCE_CAT = as.factor(df_adults$INSURANCE)
 
 # Make numerical variables into bins:
-# Bin Hospital Length of Stay:
-df_adults['HOSPITAL_LOS_2'] = ['<=5' if x<=5 else '6-10' if x<=10 
-                               else '10-20' if x <=50
-                               else '20+' for x in df_adults['HOSPITAL_LOS']]
 
-# Bin Number of Reports:
-df_adults['NUM_REPORTS_2'] = ['<=10' if x<=10 else '11-20' if x<=20 
-                              else '20-50' if x <=50
-                              else '50+' for x in df_adults['NUM_REPORTS']]
+df4=within(df_adults,{
+  # Bin Hospital Length of Stay:
+  HOSPITAL_LOS_CAT = cut(as.numeric(HOSPITAL_LOS), breaks=c(-Inf,5,10,20,Inf),labels = c("<=5","6-10","11-20",">20"))
+  # Bin Number of Reports:
+  NUM_REPORTS_CAT = cut(NUM_REPORTS, breaks=c(-Inf,10,20,50, Inf),labels = c("<=10","11-20", "21-50", ">50"))
+  # Bin Age according to MeSH:
+  AGE_CAT = cut(round(age), breaks=c(-Inf,44,64,79, Inf),labels = c("<=44","45-64", "65-79", ">=80"))
+  })
 
-# Bin Age according to MeSH:
-df_adults['AGE_AT_DISCH_3'] = ['18-44' if x<=44 else '45-64' if x<=64 
-                               else '65-79' if x <=79
-                               else '80+' for x in df_adults['AGE_AT_DISCH']]
+########################################################################
+###################### SAVE THE DATASET FOR NOW ########################
+########################################################################
 
 # Save the dataset and then Drop columns not needed for model:
-# Save dataset: (default location: C:\Users\520ha, moved to Medical Notes)
-df_adults.to_csv('df_adults_full.csv')
+# Save dataset: (location: C:\Users\520ha\Desktop\Chapman\510_Survival_Analysis)
+write.csv(df4, 'Adults_full_R.csv')
 
-# Drop columns:
-df_adults.drop(['ROW_ID_x', 'SUBJECT_ID', 'ADMITTIME', 'DISCHTIME',
-                'DEATHTIME',  'ADMISSION_LOCATION',
-                'DISCHARGE_LOCATION', 'LANGUAGE', 'RELIGION',
-                'MARITAL_STATUS', 'ETHNICITY', 'EDREGTIME', 'EDOUTTIME', 'DIAGNOSIS',
-                'HOSPITAL_EXPIRE_FLAG', 'HAS_CHARTEVENTS_DATA', 'NUM_REPORTS',
-                'ROW_ID_y', 'DOB', 'DOD', 'DOD_HOSP', 'DOD_SSN',
-                'EXPIRE_FLAG', 'followup',  'imputed', 'DOD_IMPUTED',
-                'AGE_AT_DISCH', 'HOSPITAL_LOS'], axis = 1, inplace = True)
+# Select columns that will be used in the model:
+df4 = df4 %>%
+  select(HADM_ID,ADMISSION_TYPE,INSURANCE,INSURANCE_CAT,DIAGNOSIS,LAST_ICU,
+         GENDER, MARITAL_STATUS_CAT, ETHNICITY_CAT, DISCH_LOC_CAT, AGE_CAT,
+         NUM_REPORTS_CAT,HOSPITAL_LOS_CAT, Duration,EVENT)
+
+
 
 # Get ICD Category:
-# Import ICD Diagnosese:
+# Import ICD Diagnoses:
 filename = 'C:\\Users\\520ha\\Desktop\\Chapman\\Research_2\\Medical Notes\\D_ICD_DIAGNOSES.csv.gz'
 f = gzip.open(filename)
 with gzip.open(filename) as f:
