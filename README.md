@@ -20,8 +20,12 @@ Because the data sets contain patient personal and health information, it is res
 
 ## Code Outputs
 
-It will print a summary of the survival analysis (Cox Proportional Hazard survival analysis) output before and after removing insignificant variables.
+It will output a summary of the survival analysis (Cox Proportional Hazard survival analysis) output before and after removing insignificant variables.
+
+These ouputs are in the Results folder.
 
 ## How to run the code
 
 This code is NOT executable because the data sets are restricted.
+Please read the .html file for the code and its ouputs.
+The .html file is in the Markdown Files folder
