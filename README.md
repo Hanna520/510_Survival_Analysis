@@ -27,5 +27,9 @@ These ouputs are in the Results folder.
 ## How to run the code
 
 This code is NOT executable because the data sets are restricted.
-Please read the .html file for the code and its ouputs.
-The .html file is in the Markdown Files folder
+Please read the .html files for the code and the ouputs.
+The .html files are in the Markdown Files folder.
+
+The 510_Midterm_Project.html file is the final version, and the 510_Project_First_Draft_Markdown.html is the first draft.
+
+
