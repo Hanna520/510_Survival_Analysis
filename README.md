@@ -22,10 +22,21 @@ Because the data sets contain patient personal and health information, it is res
 
 It will output a summary of the survival analysis (Cox Proportional Hazard survival analysis) output before and after removing insignificant variables.
 
-These ouputs are in the Results folder.
+These outputs are in the Results folder.
 
 ## How to run the code
 
 This code is NOT executable because the data sets are restricted.
-Please read the .html file for the code and its ouputs.
+Please read the .html file for the code and its outputs.
 The .html file is in the Markdown Files folder
+
+## Response to Peer Review comments:
+
+1. The data is de-identified. The date of birth and date of death (if applicable) are masked. There's no other information that can 
+   identify the patient. But nevertheless, the data is restricted.
+2. The inconsistency in subsetting the data by columns is fixed.
+3. About using a training and test set, since this project is to identify factors that impact the mortality and to analyze the effect of 
+   the impact, it is more explanatory than predictive at this point and thus no need to split the data into training and test sets.
+   However, our future work will include a prediction part after investigating more variables such as vital sign data and topic modeling 
+   results from doctor’s notes. In the prediction part, we will split the data into training and test sets.
+ 
