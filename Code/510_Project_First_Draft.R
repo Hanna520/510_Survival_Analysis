@@ -178,6 +178,113 @@ df4 = df4 %>%
          NUM_REPORTS_CAT,HOSPITAL_LOS_CAT,TOT_LOS_CAT, Duration,EVENT)
 
 
+########################################################################
+############# testing #################################################
+hm = df4[df4$DISCHARGE_LOCATION=="HOME",]
+
+# Reorder the levels of the new categorical variables:
+hm$HOSPITAL_LOS_CAT = factor(hm$HOSPITAL_LOS_CAT,
+                                 levels = c("<=5","6-10","11-20",">20"))
+
+hm$NUM_REPORTS_CAT = factor(hm$NUM_REPORTS_CAT, 
+                                levels = c("<=10","11-20", "21-50", ">50" ))
+
+hm$AGE_CAT = factor(hm$AGE_CAT, 
+                        levels = c("<=44", "45-64", "65-79", ">=80"))
+
+df4$HOSPITAL_LOS_CAT = factor(df4$HOSPITAL_LOS_CAT,
+                             levels = c("<=5","6-10","11-20",">20"))
+
+df4$NUM_REPORTS_CAT = factor(df4$NUM_REPORTS_CAT, 
+                            levels = c("<=10","11-20", "21-50", ">50" ))
+
+df4$AGE_CAT = factor(df4$AGE_CAT, 
+                    levels = c("<=44", "45-64", "65-79", ">=80"))
+
+# Contingency tables:
+# Home
+hm_table_los = table(factor(hm$EVENT),factor(hm$HOSPITAL_LOS_CAT))
+round(prop.table(hm_table_los,2),2)
+
+hm_table_notes = table(factor(hm$EVENT),factor(hm$NUM_REPORTS_CAT))
+round(prop.table(hm_table_notes,2),2)
+
+hm_table_age = table(factor(hm$EVENT),factor(hm$AGE_CAT))
+round(prop.table(hm_table_age,2),2)
+
+
+
+# All
+all_table_los = table(factor(df4$EVENT),factor(df4$HOSPITAL_LOS_CAT))
+round(prop.table(all_table_los,2),2)
+
+all_table_notes = table(factor(df4$EVENT),factor(df4$NUM_REPORTS_CAT))
+round(prop.table(all_table_notes,2),2)
+
+all_table_age = table(factor(df4$EVENT),factor(df4$AGE_CAT))
+round(prop.table(all_table_age,2),2)
+
+
+ggplot(hm, aes(HOSPITAL_LOS_CAT, fill = factor(EVENT))) +
+  geom_bar(width=0.5)+
+  ggtitle('Hospital Length of Stay by Event') + 
+  theme(plot.title = element_text(hjust = 0.5, size = 12)) +
+  labs(x = 'Hospital Length of Stay (days)', y = 'Number of Patients', 
+       fill = 'Event')
+
+
+ggplot(hm) + 
+  geom_bar(aes(x = NUM_REPORTS_CAT, fill = factor(EVENT)), width = 0.5) +
+  ggtitle('Number of Reports by Event') + 
+  theme(plot.title = element_text(hjust = 0.5, size = 12)) +
+  scale_color_discrete(name = 'Event') +
+  labs(x = 'Number of Reports', y = 'Number of Patients', fill = 'Event')
+
+ggplot(hm) + 
+  geom_bar(aes(x = AGE_CAT, fill = factor(EVENT)), width = 0.5) +
+  ggtitle('Age by Event') + 
+  theme(plot.title = element_text(hjust = 0.5, size = 12)) +
+  scale_color_discrete(name = 'Event') +
+  labs(x = 'Age Group', y = 'Number of Patients', fill = 'Event')
+
+ggplot(hm) + 
+  geom_bar(aes(x = INSURANCE, fill = factor(EVENT)), width = 0.5) +
+  ggtitle('Insurance by Event') + 
+  theme(plot.title = element_text(hjust = 0.5, size = 12),
+        axis.text.x = element_text(angle = 45,  hjust=1)) +
+  scale_color_discrete(name = 'Event') +
+  labs(x = 'Insurance', y = 'Number of Patients', fill = 'Event')
+
+ggplot(hm) + 
+  geom_bar(aes(x = INSURANCE_CAT, fill = factor(EVENT)), width = 0.5) +
+  ggtitle('Age by Event') + 
+  theme(plot.title = element_text(hjust = 0.5, size = 12)) +
+  scale_color_discrete(name = 'Event') +
+  labs(x = 'Age Group', y = 'Number of Patients', fill = 'Event')
+
+ggplot(hm) + 
+  geom_bar(aes(x = INSURANCE, fill = factor(EVENT)), width = 0.5) +
+  ggtitle('INSURANCE by Event') + 
+  theme(plot.title = element_text(hjust = 0.5, size = 12)) +
+  scale_color_discrete(name = 'Event') +
+  labs(x = 'INSURANCE-Home', y = 'Number of Patients', fill = 'Event')
+
+ggplot(df4) + 
+  geom_bar(aes(x = INSURANCE_CAT, fill = factor(EVENT)), width = 0.5) +
+  ggtitle('INSURANCE by Event') + 
+  theme(plot.title = element_text(hjust = 0.5, size = 12)) +
+  scale_color_discrete(name = 'Event') +
+  labs(x = 'INSURANCE', y = 'Number of Patients', fill = 'Event')
+
+ggplot(hm) + 
+  geom_bar(aes(x = INSURANCE_CAT, fill = factor(EVENT)), width = 0.5) +
+  ggtitle('Insurance by Event') + 
+  theme(plot.title = element_text(hjust = 0.5, size = 12)) +
+  scale_color_discrete(name = 'Event') +
+  labs(x = 'Insurance', y = 'Number of Patients', fill = 'Event')
+
+############# testing #################################################
+########################################################################
 
 ########################################################################
 ######################## IMPORT DIAGNOSES_ICD ##########################
