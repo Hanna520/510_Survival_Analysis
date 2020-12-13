@@ -9,17 +9,16 @@ output: html_document
 #### **Updates Since Last Submission and Responses to Peer Review Comments:**
 **Updates Since Last Submission:**
 
-  * 1. Focused only on patients who were sent home
-  * 2. Added six vital sign variables to the analysis
-  * 3. Added investigation of missing values and outliers in the vital sign variables
+  * Focused only on patients who were sent home
+  * Added six vital sign variables to the analysis
+  * Added investigation of missing values and outliers in the vital sign variables
 
-<p>&nbsp;</p>
 **Responses to Peer Review Comments:**
 
-  * 1. The data is de-identified. The date of birth and date of death (if applicable) are masked. There is no other information that can easily identify the patient. Nevertheless, the data is restricted.
-  * 2. The inconsistency in subsetting the data by columns has been fixed.
-  * 3. About training and test sets, since this project is to identify factors that impact the mortality and to analyze the effect of the impact, it is more explanatory than predictive at this point, and thus no need to split the data into training and test sets. However, our future work will include a prediction part after investigating more variables such as topic modeling results from doctor’s notes, which will require splitting the data into training and test sets.
-
+  * The data is de-identified. The date of birth and date of death (if applicable) are masked. There is no other information that can easily identify the patient. Nevertheless, the data is restricted.
+  * The inconsistency in subsetting the data by columns has been fixed.
+  * About training and test sets, since this project is to identify factors that impact the mortality and to analyze the effect of the impact, it is more explanatory than predictive at this point, and thus no need to split the data into training and test sets. However, our future work will include a prediction part after investigating more variables such as topic modeling results from doctor’s notes, which will require splitting the data into training and test sets.
+<p>&nbsp;</p>
 
 ### **Survival Analysis**
 
@@ -52,8 +51,8 @@ library(grid)
 library(tiff)
 ```
 
+<p>&nbsp;</p>
 ### IMPORT NOTEEVENTS
-<br/>
 A patient can have multiple reports (or doctor's notes). We hypothesize that the more doctor's notes, the higher the risk of mortality.But the number of reports is not readily available in the data set.
 
 The following code creates a variable NUM_REPORTS (Number of Reports) from the NOTEEVENTS data set by grouping the data by HADM_ID (Hospital Admission ID) and then counting the number of rows in each group.
@@ -146,6 +145,7 @@ This data set contains the ICD9_CODE (code for type of diagnosed disease) for ea
 ```{r warning=FALSE, message=FALSE}
 filename <- gzfile('Data/DIAGNOSES_ICD.csv.gz','rt')
 diagnoses <- read.csv(filename)
+str(diagnoses)
 
 diagnoses <- diagnoses[,c("HADM_ID","ICD9_CODE")]
 
@@ -361,6 +361,7 @@ df_all$AGE_CAT = factor(df_all$AGE_CAT,
                         levels = c("<=40","41-55", "56-70", ">70"))
 ```
 
+<p>&nbsp;</p>
 ### DATA VISUALIZATION
 
 The following code plots the Hospital Length of Stay vs Event
@@ -595,56 +596,7 @@ all_vital_clean <- all_vital_clean %>%
   GENDER = factor(GENDER)
 )
 ```
-
 <p>&nbsp;</p>
-The following code examines the missing values and identifies the missing value type (MCAR, MAR, or MNAR). Since the majority of the missing values in the six vital sign variables are in the same rows, investigating one of them (for example Temperature) would suffice. 
-
-```{r}
-# Create a new variable with a value of 1 if Temperature is missing, 0 otherwise
-vital_miss <- all_vital_clean %>%
-  mutate(missing = factor(ifelse(temperature_cat=="Missing",1,0))) %>%
-  select(-c(HADM_ID,Duration,temperature_cat,heart_cat,oxygen_cat,resp_cat,
-            diastolic_cat,systolic_cat))
-
-# Select only factor variables (remove "missing" and numerical variables)
-vital_miss_cat <- vital_miss %>% 
-  select_if(is.factor) %>%
-  select(-missing)
-
-# Run a Chisquare test on the above data with "missing" as the group to test if the missingness is related to the values of the factor variables.
-n_col <- ncol(vital_miss_cat)
-p_value <- rep(0,n_col)
-for (ii in 1:n_col){
-  test <- chisq.test(vital_miss_cat[,ii],vital_miss$missing)
-  p_value[ii] <- round(test$p.value,4)
-}
-cbind(names(vital_miss_cat), p_value)
-```
-
-<p>&nbsp;</p>
-The following code further investigates the missing values with simultaneous investigation, which fits a logistic regression model to predict the missingness using other variables, and then compares the misclassification rate of the predictions and the percentage of missing values in the data. If the two values are about the same, then the missing values are Missing Completely At Random (MCAR). If the misclassification rate is smaller, then the missing values are Missing At Random (MAR).
-
-```{r warning=FALSE, message=FALSE}
-# Create a new variable with a value of 1 if Temperature is missing, 0 otherwise. Remove the ID, Duration, and the six vital sign variables
-df_mis <- all_vital_clean %>%
-  mutate(missing = factor(ifelse(temperature_cat=="Missing",1,0))) %>%
-  select(-c("HADM_ID","Duration","temperature_cat","heart_cat","oxygen_cat",
-            "resp_cat","diastolic_cat","systolic_cat"))
-
-# Fit a logistic regression model with "missing" as the response variable and make predictions  
-mod_mis <- glm(missing~., data=df_mis, family="binomial")
-pred_mis <- predict.glm(mod_mis, type = "response")
-pred_mis <- ifelse(pred_mis > 0.5, 1,0)
-
-# Calculate the misclassification rate from the model predictions
-misclass <- sum(df_mis$missing!=pred_mis)/nrow(df_mis)
-# Calculate the rate of missing values from the data
-missing_rate <- sum(as.numeric(df_mis$missing==1))/nrow(df_mis)
-
-cat(paste(paste0("The rate of missing values is ", round(missing_rate,4),"."),
-          paste0("\nThe misclassification rate is ", round(misclass,4),".")))
-```
-
 
 ### COX PROPORTIONAL HAZARD SURVIVAL ANALYSIS
 
@@ -664,7 +616,7 @@ summary(coxph)
 <p>&nbsp;</p>
 The following code saves the summary of the output of the coxph model with all variables to the results folder.
 
-```{r warning=FALSE, message=FALSE}
+```{r warning=FALSE, message=FALSE, results="hide"}
 sink(file = 'Results/home_all_vars.txt')
 summary(coxph)
 sink(file=NULL)
@@ -684,7 +636,7 @@ summary(coxph)
 <p>&nbsp;</p>
 The following code saves the summary of the output of the coxph model with significant variables only to the results folder.
 
-```{r warning=FALSE, message=FALSE}
+```{r warning=FALSE, message=FALSE, results="hide"}
 sink(file = 'Results/home_sig.txt')
 summary(coxph)
 sink(file=NULL)
@@ -697,16 +649,16 @@ The following code plots the hazard ratio.
 ggforest(coxph, data = x, main="Hazard Ratio for Patients Discharged Home", fontsize = 0.7)
 ```
 
-<p>&nbsp;</p>
 The following code saves the plot to the Results folder.
 
-```{r}
+```{r results="hide"}
 tiff(file="Results/plot_hazard_ratio_home.tiff",
      width=10, height=15, units="in", res=300)
 ggforest(coxph, data = x, main="Hazard Ratio for Patients Discharged Home", fontsize = 0.7)
 dev.off()
 ```
 
+<p>&nbsp;</p>
 ### FINDINGS
   The coef column shows the logarithm of the odds ratio of mortality, and the exp(coef) column shows the odds ratio. A positive coef (or exp(coef) > 1) suggests that the factor is contributing to the mortality, and the larger the absolute value of the coef, the higher the risk of mortality.
   Based on the results from the coxph model with significant factors only, we have the following major findings:
