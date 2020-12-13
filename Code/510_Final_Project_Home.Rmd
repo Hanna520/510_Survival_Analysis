@@ -1,0 +1,722 @@
+---
+title: "510_Final_Project"
+author: "Hanna Lu"
+date: "12/11/2020"
+output: html_document
+---
+
+<p>&nbsp;</p>
+#### **Updates Since Last Submission and Responses to Peer Review Comments:**
+**Updates Since Last Submission:**
+
+  * 1. Focused only on patients who were sent home
+  * 2. Added six vital sign variables to the analysis
+  * 3. Added investigation of missing values and outliers in the vital sign variables
+
+<p>&nbsp;</p>
+**Responses to Peer Review Comments:**
+
+  * 1. The data is de-identified. The date of birth and date of death (if applicable) are masked. There is no other information that can easily identify the patient. Nevertheless, the data is restricted.
+  * 2. The inconsistency in subsetting the data by columns has been fixed.
+  * 3. About training and test sets, since this project is to identify factors that impact the mortality and to analyze the effect of the impact, it is more explanatory than predictive at this point, and thus no need to split the data into training and test sets. However, our future work will include a prediction part after investigating more variables such as topic modeling results from doctor’s notes, which will require splitting the data into training and test sets.
+
+
+### **Survival Analysis**
+
+Patients are discharged to different locations such as SNF (skilled nursing facilities), hospice, long-term care hospitals, rehabilitation facilities, and home according to doctors’ judgment of the patients’ health condition at the end of their stay in the hospital. Those who are sent home are considered to be in a steady and safe condition at the end of their hospital stay. However, a significant percentage of patients who are sent home die within 90 days of discharge from the hospital. In this study, we aim to find the mortality risk indicators to help doctors reevaluate their patient discharge decisions in hope of reducing mortality rate among patients who are sent home after their stay in the hospital. 
+
+This analysis uses variables from 11 data sets. Some of them are re-engineered. In addition to the demographic and hospital stay information, comorbidity indexes and vital signs are also investigated in this study.
+
+<p>&nbsp;</p>
+#### Data Source: https://mimic.physionet.org/gettingstarted/access/
+
+
+```{r setup, echo=FALSE}
+knitr::opts_knit$set(root.dir = "C:/Users/520ha/Desktop/Chapman/510_Survival_Analysis")
+```
+
+<p>&nbsp;</p>
+Install packages:
+```{r message=FALSE, warning=FALSE}
+
+library(dplyr)
+library(stringr)
+library(reshape2)
+library(comorbidity)
+library(ggplot2)
+library(visdat)
+library(naniar)
+library(survival)
+library(survminer)
+library(grid)
+library(tiff)
+```
+
+### IMPORT NOTEEVENTS
+<br/>
+A patient can have multiple reports (or doctor's notes). We hypothesize that the more doctor's notes, the higher the risk of mortality.But the number of reports is not readily available in the data set.
+
+The following code creates a variable NUM_REPORTS (Number of Reports) from the NOTEEVENTS data set by grouping the data by HADM_ID (Hospital Admission ID) and then counting the number of rows in each group.
+
+```{r}
+filename <- gzfile('Data/NOTEEVENTS.csv.gz','rt')
+note <- read.csv(filename)
+
+str(note)
+
+# Create a data frame with 2 columns (HADM_ID and NUM_REPORTS) to be joined
+# with other data sets
+num_reports <- note %>%
+  group_by(HADM_ID) %>%
+  summarise(NUM_REPORTS = n(),.groups = 'drop') %>%
+  select(HADM_ID, NUM_REPORTS)
+
+rm(note)
+```
+
+### IMPORT ADMISSIONS
+
+The ADMISSIONS data set contains some demographic information of the patients, as well as hospital admission and discharge information 
+
+The following code joins this data set with the Number of Reports data extracted from the NOTEEVENTS data set.
+
+```{r}
+filename <- gzfile('Data/ADMISSIONS.csv.gz','rt')
+admissions <- read.csv(filename)
+
+str(admissions)
+
+# Merge admissions and num_reports (inner join):
+adm = merge(admissions, num_reports, by='HADM_ID')
+
+rm(admissions)
+```
+
+### IMPORT ICUSTAYS
+
+This data set contains the ICU stay information such as the first and last ICU unit the patient stayed in, in and out time, and length of stay.
+
+A patient can be admitted to different ICU units during their stay in the hospital. We hypothesize that the last ICU unit the patient stayed in may be related to the patient's risk of mortality since it carries the information about the patient's latest condition. ICU length of stay may have an impact on the mortality risk as well.
+
+The following code extracts the last ICU unit the patient stayed in, and the total length of stay in all ICU units.
+
+```{r warning=FALSE}
+filename <- gzfile('Data/ICUSTAYS.csv.gz','rt')
+icu <- read.csv(filename)
+
+str(icu)
+
+# Create two columns for the last ICU unit and total Length of Stay:
+icu_last <- icu %>%
+  select(HADM_ID, LAST_CAREUNIT, LOS) %>%
+  group_by(HADM_ID) %>%
+  mutate(LAST_ICU = last(LAST_CAREUNIT)) %>%
+  select(HADM_ID, LAST_ICU) %>%
+  distinct()
+
+# Merge ICU Unit data with admission data (inner join):
+adm_icu <- merge(adm, icu_last, by = 'HADM_ID')
+
+rm(icu)
+```
+
+
+### IMPORT PATIENTS
+
+This data set contains patients' personal information such as gender, date of birth, and date of death. We need the date of birth variable to calculate the patients' age, and the date of death variable to create the EVENT column (weather of not a death event occurred) and the Duration column (length of time until a death event occurred) for the survival analysis.
+
+The following code joins this data set with the previous data set.
+
+```{r}
+filename <- gzfile('Data/PATIENTS.csv.gz','rt')
+patients <- read.csv(filename)
+
+str(patients)
+
+# Merge patients and adm_icu:
+df_patient_icu <- merge(adm_icu, patients, by='SUBJECT_ID', all.x = T)
+
+rm(patients)
+```
+
+### IMPORT DIAGNOSES_ICD
+
+This data set contains the ICD9_CODE (code for type of diagnosed disease) for each patient. A patient can have multiple ICD9 codes
+
+```{r warning=FALSE, message=FALSE}
+filename <- gzfile('Data/DIAGNOSES_ICD.csv.gz','rt')
+diagnoses <- read.csv(filename)
+
+diagnoses <- diagnoses[,c("HADM_ID","ICD9_CODE")]
+
+df_com <- merge(df_patient_icu, diagnoses, by = 'HADM_ID', all.x = T)
+
+rm(diagnoses)
+```
+
+
+### COMORBIDITY SCORES
+The following code calculates the comorbidity scores using the comorbidity package. The comorbidity function generates 17 comorbidity scores, of which, "score", "index","wscore",and "windex" are overall scores, and the rest are specific to a certain disease. Therefore, the 4 overall scores are correlated with the specific scores, and thus need to be removed.
+
+```{r warning=FALSE, message=FALSE}
+# Charlson comorbidity scores based on ICD-10 diagnostic codes:
+df_comorbidity <- comorbidity(x = df_com, id = "HADM_ID", code = "ICD9_CODE", 
+                             score = "charlson", assign0 = FALSE, icd = 'icd9')
+
+# Remove the last four items from the comorbidity output
+df_comorbidity <- df_comorbidity[,!names(df_comorbidity) %in% 
+                                   c("score", "index","wscore","windex")]
+
+# Remove the icd code column from original data frame:
+com_no_icd <- df_com[,names(df_com) != 'ICD9_CODE']
+
+# Remove duplicates from original data frame:
+unique_com <- unique(com_no_icd)
+
+# Merge the main dataset and the comorbidity:
+com_all <- merge(unique_com, df_comorbidity, by="HADM_ID")
+
+# Remove "DIAGNOSIS":
+com_all <- select(com_all, -DIAGNOSIS)
+```
+
+### DATA CLEANING
+
+The following code generates the EVENT column (whether or not a patient died within 90 days of discharge from hospital) and the Duration column (time difference between Date of Death and Date of Discharge if the patient died during the following up period. If Date of Death is missing, set it as 300 days)
+
+The following code also removes the patients who are admitted to the hospital as "NEWBORN", or died within one day after discharge, or died in the hospital.
+
+```{r}
+# Convert DOD (Date of Death) to date format:
+com_all$DOD <- as.Date(com_all$DOD, format = '%Y-%m-%d')
+
+df_all <- com_all %>%
+  # Identify DODs after 90 days and create Duration column
+  mutate(Duration = ifelse(is.na(DOD), 300, 
+                           (DOD - as.Date(DISCHTIME, format = '%Y-%m-%d %H:%M:%S')))) %>%
+  # Create EVENT (death within 90 days of discharge as 1, otherwise 0)
+  mutate(EVENT = ifelse(Duration <= 90, 1, 0)) %>%
+  # Remove patients who died before discharge or within one day of discharge
+  # Remove newborns
+  # Remove patients who died in hospital
+  filter(Duration >= 1 & ADMISSION_TYPE!='NEWBORN' & HOSPITAL_EXPIRE_FLAG == 0)
+```
+
+<p>&nbsp;</p>
+The following code creates the HOSPITAL_LOS (Hospital Length of Stay, which is time between admission and discharge) and Age(age at time of discharge)  columns. It also removes the patients who stayed in the hospital for less than one day, who are under the age of 18, and those who are discharged to places other than home.
+
+```{r}
+df_all <- df_all %>%
+  # Create a column for hospital length of stay
+  mutate(HOSPITAL_LOS = (as.Date(DISCHTIME, format = '%Y-%m-%d %H:%M:%S') - 
+                           as.Date(ADMITTIME, format = '%Y-%m-%d %H:%M:%S'))) %>%
+  # Remove those who stayed less than 1 day in the hospital
+  filter(HOSPITAL_LOS > 1) %>%
+  # Create Age at Discharge column from DOB and Discharge time columns
+  mutate(age = (as.Date(DISCHTIME, format = '%Y-%m-%d %H:%M:%S') -
+                  as.Date(DOB, format = '%Y-%m-%d %H:%M:%S'))/365) %>%
+  # Remove those who are under the age of 18:
+  filter(age >= 18) %>%
+  # Keep only the patients who are sent home
+  filter(DISCHARGE_LOCATION == 'HOME')
+
+# If age is greater than 100, code it to 90
+# In the MIMIC database, patients older than 89 were coded as 300 years old
+df_all$age <- ifelse(df_all$age > 100, 90, round(df_all$age,1))
+```
+
+<p>&nbsp;</p>
+The following code re-groups categorical variables.
+
+```{r}
+# Regroup Marital Status:
+df_all <- df_all %>% 
+  mutate(MARITAL_STATUS_CAT = case_when(
+          MARITAL_STATUS == 'SINGLE'                       ~ 'SINGLE',
+          MARITAL_STATUS == 'WIDOWED'                      ~ 'WIDOWED',
+          MARITAL_STATUS %in% c('MARRIED', 'LIFE PARTNER') ~ 'MARRIED',
+          MARITAL_STATUS %in% c('DIVORCED','SEPARATED')    ~ 'DIVORCED',
+          TRUE                                             ~ 'UNKNOWN'))
+
+df_all$MARITAL_STATUS_CAT <- factor(df_all$MARITAL_STATUS_CAT,
+                                    levels = c("MARRIED","SINGLE","DIVORCED",
+                                       "WIDOWED", "UNKNOWN"))
+
+# Regroup Ethnicity:
+df_all <- df_all %>%
+  mutate(ETHNICITY_CAT = case_when(
+    str_detect(ETHNICITY, 'WHITE')                               ~ 'WHITE',
+    str_detect(ETHNICITY, 'BLACK')                               ~ 'BLACK',
+    str_detect(ETHNICITY, 'HISPANIC')                            ~ 'HISPANIC',
+    str_detect(ETHNICITY, 'ASIAN')                               ~ 'ASIAN',
+    ETHNICITY %in% c('UNKNOWN/NOT SPECIFIED','UNABLE TO OBTAIN',
+                     'PATIENT DECLINED TO ANSWER')               ~ 'UNKNOWN',
+    TRUE                                                         ~ 'OTHER'))
+
+df_all$ETHNICITY_CAT <- factor(df_all$ETHNICITY_CAT, 
+                               levels = c("WHITE","BLACK","HISPANIC","ASIAN",
+                                          "OTHER","UNKNOWN"))
+```
+
+<p>&nbsp;</p>
+The following code creates a function that plots the data against its corresponding mortality rate, which helps with grouping a continuous variable in a more meaningful way.
+
+```{r}
+grouping <- function(var){
+  xx <- table(round(var), df_all$EVENT)
+  
+  xx <- cbind(xx, xx[,2]/(xx[,1]+xx[,2]))
+  
+  h <- seq(range(round(var))[1], range(round(var))[2],1)
+  
+  xx <- cbind(h, xx)
+  dd <- as.data.frame(xx)
+  names(dd) = c('var','No','Yes','Proportion')
+  p = ggplot(dd, aes(x=var, y=Proportion))+
+    geom_point() +
+    geom_smooth(color = 'red', se=FALSE)
+  return(p)
+}
+```
+
+<p>&nbsp;</p>
+The following plots the age variable using the above function:
+
+```{r fig1, fig.height = 3, fig.width = 5, fig.align = "center", message=FALSE, warning=FALSE}
+p1 <- grouping(df_all$age)
+p1 + geom_line(aes(x=40), color='blue') +
+  geom_line(aes(x=55), color='blue') +
+  geom_line(aes(x=70), color='blue') +
+  labs(title='Age vs 90-day Mortality', x = 'Age Group',
+       y='Proportion of 90-day Mortality')+
+  theme(legend.position = "none",
+        plot.title = element_text(size = 12, hjust = 0.5))
+```
+
+<p>&nbsp;</p>
+The following plots the hospital length of stay variable using the above function:
+
+```{r fig2, fig.height = 3, fig.width = 5, fig.align = "center", message=FALSE, warning=FALSE}
+df_all$HOSPITAL_LOS <- as.numeric(df_all$HOSPITAL_LOS, units="days")
+p2 <- grouping(df_all$HOSPITAL_LOS) 
+p2 + geom_line(aes(x=3), color='blue') +
+  geom_line(aes(x=5), color='blue') +
+  geom_line(aes(x=10), color='blue') +
+  xlim(0,20) +
+  ylim(0,0.1)+
+  labs(title='Hospital Length of Stay vs 90-day Mortality', 
+       x = 'Hospital Length of Stay (Days)', 
+       y='Proportion of 90-day Mortality') +
+  theme(legend.position = "none",
+        plot.title = element_text(size = 12, hjust = 0.5))
+```
+
+<p>&nbsp;</p>
+The following plots the number of reports (doctor's notes) variable using the above function:
+
+```{r fig3, fig.height = 3, fig.width = 5, fig.align = "center", message=FALSE, warning=FALSE}
+# Impute the NUM_REPORTS column with 0 where Num_reports is missing
+df_all$NUM_REPORTS <- ifelse(is.na(df_all$NUM_REPORTS), 0, df_all$NUM_REPORTS)
+p3 <- grouping(df_all$NUM_REPORTS) 
+p3 + geom_line(aes(x=5), color='blue') +
+  geom_line(aes(x=10), color='blue') +
+  geom_line(aes(x=20), color='blue') +
+  xlim(0,40) +
+  ylim(0,0.1)+
+  labs(title='Number of Reports vs 90-day Mortality', 
+       x = 'Number of Reports', y='Proportion of 90-day Mortality')+
+  theme(legend.position = "none",
+        plot.title = element_text(size = 12, hjust = 0.5))
+```
+
+<p>&nbsp;</p>
+The following code converts the numerical variables into categorical according to the plots above.
+
+```{r}
+df_all <- within(df_all,{
+  # Bin Age according to MeSH:
+  AGE_CAT <- cut(round(age), breaks=c(-Inf,40,55,70, Inf),
+                 labels = c("<=40","41-55", "56-70", ">70"))
+  # Bin Hospital Length of Stay:
+  HOSPITAL_LOS_CAT <- cut(as.numeric(HOSPITAL_LOS), breaks=c(-Inf,3,5,10,Inf),
+                          labels = c("2-3","4-5","6-10",">10"))
+  # Bin Number of Reports:
+  NUM_REPORTS_CAT <- cut(NUM_REPORTS, breaks=c(-Inf,5,10,20, Inf),
+                         labels = c("<=5","6-10", "11-20", ">20"))
+  
+})
+```
+
+<p>&nbsp;</p>
+The following code re-orders the levels of the new categorical variables:
+
+```{r}
+df_all$HOSPITAL_LOS_CAT = factor(df_all$HOSPITAL_LOS_CAT,
+                                 levels = c("2-3","4-5","6-10",">10"))
+
+df_all$NUM_REPORTS_CAT = factor(df_all$NUM_REPORTS_CAT, 
+                                levels = c("<=5","6-10", "11-20", ">20"))
+
+df_all$AGE_CAT = factor(df_all$AGE_CAT, 
+                        levels = c("<=40","41-55", "56-70", ">70"))
+```
+
+### DATA VISUALIZATION
+
+The following code plots the Hospital Length of Stay vs Event
+```{r fig4, fig.height = 3, fig.width = 5, fig.align = "center", message=FALSE, warning=FALSE}
+ggplot(df_all) + 
+  geom_bar(aes(x = HOSPITAL_LOS_CAT, fill = factor(EVENT)),width = 0.5) +
+  ggtitle('Hospital Length of Stay by Event') + 
+  theme(plot.title = element_text(hjust = 0.5, size = 12)) +
+  labs(x = 'Hospital Length of Stay (days)', y = 'Number of Patients', 
+       fill = 'Event')
+```
+
+<p>&nbsp;</p>
+The following code plots the Number of Reports by Event:
+```{r fig5, fig.height = 3, fig.width = 5, fig.align = "center", message=FALSE, warning=FALSE}
+ggplot(df_all) + 
+  geom_bar(aes(x = NUM_REPORTS_CAT, fill = factor(EVENT)), width = 0.5) +
+  ggtitle('Number of Reports by Event') + 
+  theme(plot.title = element_text(hjust = 0.5, size = 12)) +
+  scale_color_discrete(name = 'Event') +
+  labs(x = 'Number of Reports', y = 'Number of Patients', fill = 'Event')
+```
+
+<p>&nbsp;</p>
+The following code plots Age by Event:
+```{r fig6, fig.height = 3, fig.width = 5, fig.align = "center", message=FALSE, warning=FALSE}
+ggplot(df_all) + 
+  geom_bar(aes(x = AGE_CAT, fill = factor(EVENT)), width = 0.5) +
+  ggtitle('Age by Event') + 
+  theme(plot.title = element_text(hjust = 0.5, size = 12)) +
+  scale_color_discrete(name = 'Event') +
+  labs(x = 'Age Group', y = 'Number of Patients', fill = 'Event')
+```
+ 
+<p>&nbsp;</p>
+The following code plots Admission Type by Event: 
+```{r fig7, fig.height = 3, fig.width = 5, fig.align = "center", message=FALSE, warning=FALSE}
+ggplot(df_all) + 
+  geom_bar(aes(x = ADMISSION_TYPE, fill = factor(EVENT)), width = 0.5) +
+  ggtitle('Admission Type by Event') + 
+  theme(plot.title = element_text(hjust = 0.5, size = 12)) +
+  scale_color_discrete(name = 'Event') +
+  labs(x = 'Admission Type', y = 'Number of Patients', fill = 'Event')
+```
+
+<p>&nbsp;</p>
+The following code plots MARITAL_STATUS_CAT by Event:
+```{r fig8, fig.height = 3, fig.width = 5, fig.align = "center", message=FALSE, warning=FALSE}
+ggplot(df_all) + 
+  geom_bar(aes(x = MARITAL_STATUS_CAT, fill = factor(EVENT)), width = 0.5) +
+  ggtitle('Marital Status by Event') + 
+  theme(plot.title = element_text(hjust = 0.5, size = 12),
+        axis.text.x = element_text(angle = 45, vjust=1, hjust=1)) +
+  scale_color_discrete(name = 'Event') +
+  labs(x = 'Marital Status', y = 'Number of Patients', fill = 'Event')
+```
+
+<p>&nbsp;</p>
+The following code plots ETHNICITY_CAT by Event:
+```{r fig9, fig.height = 3, fig.width = 5, fig.align = "center", message=FALSE, warning=FALSE}
+ggplot(df_all) + 
+  geom_bar(aes(x = ETHNICITY_CAT, fill = factor(EVENT)), width = 0.5) +
+  ggtitle('Ethnicity by Event') + 
+  theme(plot.title = element_text(hjust = 0.5, size = 12),
+        axis.text.x = element_text(angle = 45, vjust=1, hjust=1)) +
+  scale_color_discrete(name = 'Event') +
+  labs(x = 'Ethnicity', y = 'Number of Patients', fill = 'Event')
+```
+
+### VITAL SIGN DATA
+
+The following code adds the vital sign data to the cleaned data set in hoping of improving the survival analysis results. The missing values and outliers are detected and treated in the following code. There are missing values in the vital sign data, which is assumed based on domain knowledge to be from patients who were not required to take those measurements. Outliers in the vital sign data are detected by domain knowledge instead of statistical methods. For example, the blood oxygen saturation should not exceed 100, and should not be below 0. There are only a few such outliers, and they are temporarily treated as missing values. The missing values are coded as "Missing", and the non-missing values are coded into categories such as "Low", "Normal", and "High", where the "Normal" range is based on domain knowledge. 
+
+```{r}
+# Select columns that will be used in the survival analysis:
+all <- df_all %>%
+  select("HADM_ID","ADMISSION_TYPE","LAST_ICU", "GENDER",
+         "ami","chf","pvd","cevd","dementia","copd","rheumd","pud","mld",          
+         "diab","diabwc" ,"hp", "rend","canc","msld","metacanc","aids",
+         "Duration", "EVENT","MARITAL_STATUS_CAT", "ETHNICITY_CAT",    
+         "AGE_CAT","NUM_REPORTS_CAT","HOSPITAL_LOS_CAT")
+```
+
+<p>&nbsp;</p>
+#### BODY TEMERATURE
+```{r}
+temperature <- read.csv("Data/Vital_Sign_Data/temperatureFixed.csv")
+temperature <- select(temperature, c("HADM_ID","TEMPERATURE_LAST"))
+
+# Merge with the main data set
+all_vital <- merge(all, temperature, by="HADM_ID", all.x =TRUE)
+```
+<p>&nbsp;</p>
+#### HEART RATE
+```{r}
+heart <- read.csv("Data/Vital_Sign_Data/heartRateFixed.csv")
+heart <- select(heart, c("HADM_ID","HeartRate_LAST"))
+
+# Merge with the main data set
+all_vital <- merge(all_vital, heart, by="HADM_ID", all.x =TRUE)
+```
+
+<p>&nbsp;</p>
+#### OXYGEN SATURATION
+```{r}
+oxygen <- read.csv("Data/Vital_Sign_Data/spo2Fixed.csv")
+oxygen <- select(oxygen, c("HADM_ID","SpO2_LAST"))
+
+# Merge with the main data set
+all_vital <- merge(all_vital, oxygen, by="HADM_ID", all.x =TRUE)
+```
+
+<p>&nbsp;</p>
+#### RESPIROTORY RATE
+```{r}
+resp <- read.csv("Data/Vital_Sign_Data/respRateFixed.csv")
+resp <- select(resp, c("HADM_ID","RespRate_LAST"))
+
+# Merge with the main data set
+all_vital <- merge(all_vital, resp, by="HADM_ID", all.x =TRUE)
+```
+
+<p>&nbsp;</p>
+#### DIASTOLIC BLOOD PRESSURE
+```{r}
+diastolic <- read.csv("Data/Vital_Sign_Data/diastolicBPfixed.csv")
+diastolic <- select(diastolic, c("HADM_ID","DIASTOLIC_BP_LAST"))
+
+# Merge with the main data set
+all_vital <- merge(all_vital, diastolic, by="HADM_ID", all.x =TRUE)
+```
+<p>&nbsp;</p>
+#### SYSTOLIC BLOOD PRESSURE
+```{r}
+systolic <- read.csv("Data/Vital_Sign_Data/systolicBPfixed.csv")
+systolic <- select(systolic, c("HADM_ID","SYSTOLIC_BP_LAST"))
+
+# Merge with the main data set
+all_vital <- merge(all_vital, systolic, by="HADM_ID", all.x =TRUE)
+```
+
+<p>&nbsp;</p>
+#### HANDLING MISSING VALUES IN VITAL SIGN DATA
+
+The following code plot the number of missing values in each of the six vital sign variables.
+
+```{r fig10, fig.height = 3, fig.width = 4, fig.align = "center", message=FALSE, warning=FALSE}
+names(all_vital)[29:34] = c("temperature","heart_rate","oxygen","resp_rate",   
+                            "diastolic_bp", "systolic_bp" )
+
+# Plot
+gg_miss_var(all_vital[,29:34])+ 
+  labs(y = "Number of Missing Values",
+       title = "Missing Values in Vital Sign Variables")
+```
+
+The following code plot the location of the missing values in each of the six vital sign variables with the percentage of missing values at the bottom of the plot.
+
+```{r fig11, fig.height = 3, fig.width = 4, fig.align = "center", message=FALSE, warning=FALSE}
+
+vis_miss(all_vital[,29:34], show_perc_col = FALSE)
+```
+
+<p>&nbsp;</p>
+The following code groups vital sign data into categories, where outliers are temporarily treated as missing values. The cut off values are based on domain knowledge.
+
+The fact that the missing values in all six vital sign variables occur in the same rows suggests that they are from patients who were not required to take those measurements. In this case, it is not suitable to impute the missing values. Therefore, a reasonable approach is to convert the variable to categorical, and code the missing values as missing, and the non-missing values to "Low", "Normal", and "High".
+
+```{r}
+all_vital_clean <- all_vital %>% 
+  mutate(temperature_cat = case_when(
+    is.na(temperature) == TRUE   ~ 'Missing',
+    temperature <= 0             ~ 'Missing',
+    temperature < 36.5           ~ 'Low',
+    temperature <= 37.5          ~ 'Normal',
+    TRUE                              ~ 'High'),
+    heart_cat = case_when(
+      is.na(heart_rate) == TRUE   ~ 'Missing',
+      heart_rate <= 0             ~ 'Missing',
+      heart_rate < 60             ~ 'Low',
+      heart_rate <= 100           ~ 'Normal',
+      heart_rate <= 300           ~ 'High',
+      TRUE                        ~ 'Missing'),
+    oxygen_cat = case_when(
+      is.na(oxygen) == TRUE   ~ 'Missing',
+      oxygen <= 0             ~ 'Missing',
+      oxygen < 90             ~ 'VeryLow',
+      oxygen <= 94            ~ 'Low',
+      oxygen <= 100           ~ 'Normal',
+      TRUE                    ~ 'Missing'),
+    resp_cat = case_when(
+      is.na(resp_rate) == TRUE   ~ 'Missing',
+      resp_rate <= 0             ~ 'Missing',
+      resp_rate < 12             ~ 'Low',
+      resp_rate <= 25            ~ 'Normal',
+      TRUE                       ~ 'High'),
+    diastolic_cat = case_when(
+      is.na(diastolic_bp) == TRUE   ~ 'Missing',
+      diastolic_bp <= 0             ~ 'Missing',
+      diastolic_bp < 60             ~ 'Low',
+      diastolic_bp <= 80            ~ 'Normal',
+      TRUE                          ~ 'High'),
+    systolic_cat = case_when(
+      is.na(systolic_bp) == TRUE   ~ 'Missing',
+      systolic_bp <= 0             ~ 'Missing',
+      systolic_bp < 90             ~ 'Low',
+      systolic_bp <= 120           ~ 'Normal',
+      TRUE                         ~ 'High')
+    )
+```
+
+<p>&nbsp;</p>
+The following code re-orders the levels of the new categorical vital sign variables, and deletes the original variables。
+
+```{r}
+all_vital_clean <- all_vital_clean %>%
+  mutate(
+  temperature_cat = factor(temperature_cat, levels = c("Normal", "Low", "High", "Missing")),
+  heart_cat = factor(heart_cat, levels = c("Normal", "Low", "High", "Missing")),
+  oxygen_cat = factor(oxygen_cat, levels = c("Normal", "VeryLow", "Low", "High", "Missing")),
+  resp_cat = factor(resp_cat, levels = c("Normal", "Low", "High", "Missing")),
+  diastolic_cat = factor(diastolic_cat, levels = c("Normal", "Low", "High", "Missing")),
+  systolic_cat = factor(systolic_cat, levels = c("Normal", "Low", "High", "Missing")),
+  temperature = NULL,
+  heart_rate = NULL,
+  oxygen = NULL,
+  resp_rate = NULL,
+  diastolic_bp = NULL,
+  systolic_bp = NULL,
+  ADMISSION_TYPE = factor(ADMISSION_TYPE),
+  LAST_ICU = factor(LAST_ICU),
+  GENDER = factor(GENDER)
+)
+```
+
+<p>&nbsp;</p>
+The following code examines the missing values and identifies the missing value type (MCAR, MAR, or MNAR). Since the majority of the missing values in the six vital sign variables are in the same rows, investigating one of them (for example Temperature) would suffice. 
+
+```{r}
+# Create a new variable with a value of 1 if Temperature is missing, 0 otherwise
+vital_miss <- all_vital_clean %>%
+  mutate(missing = factor(ifelse(temperature_cat=="Missing",1,0))) %>%
+  select(-c(HADM_ID,Duration,temperature_cat,heart_cat,oxygen_cat,resp_cat,
+            diastolic_cat,systolic_cat))
+
+# Select only factor variables (remove "missing" and numerical variables)
+vital_miss_cat <- vital_miss %>% 
+  select_if(is.factor) %>%
+  select(-missing)
+
+# Run a Chisquare test on the above data with "missing" as the group to test if the missingness is related to the values of the factor variables.
+n_col <- ncol(vital_miss_cat)
+p_value <- rep(0,n_col)
+for (ii in 1:n_col){
+  test <- chisq.test(vital_miss_cat[,ii],vital_miss$missing)
+  p_value[ii] <- round(test$p.value,4)
+}
+cbind(names(vital_miss_cat), p_value)
+```
+
+<p>&nbsp;</p>
+The following code further investigates the missing values with simultaneous investigation, which fits a logistic regression model to predict the missingness using other variables, and then compares the misclassification rate of the predictions and the percentage of missing values in the data. If the two values are about the same, then the missing values are Missing Completely At Random (MCAR). If the misclassification rate is smaller, then the missing values are Missing At Random (MAR).
+
+```{r warning=FALSE, message=FALSE}
+# Create a new variable with a value of 1 if Temperature is missing, 0 otherwise. Remove the ID, Duration, and the six vital sign variables
+df_mis <- all_vital_clean %>%
+  mutate(missing = factor(ifelse(temperature_cat=="Missing",1,0))) %>%
+  select(-c("HADM_ID","Duration","temperature_cat","heart_cat","oxygen_cat",
+            "resp_cat","diastolic_cat","systolic_cat"))
+
+# Fit a logistic regression model with "missing" as the response variable and make predictions  
+mod_mis <- glm(missing~., data=df_mis, family="binomial")
+pred_mis <- predict.glm(mod_mis, type = "response")
+pred_mis <- ifelse(pred_mis > 0.5, 1,0)
+
+# Calculate the misclassification rate from the model predictions
+misclass <- sum(df_mis$missing!=pred_mis)/nrow(df_mis)
+# Calculate the rate of missing values from the data
+missing_rate <- sum(as.numeric(df_mis$missing==1))/nrow(df_mis)
+
+cat(paste(paste0("The rate of missing values is ", round(missing_rate,4),"."),
+          paste0("\nThe misclassification rate is ", round(misclass,4),".")))
+```
+
+
+### COX PROPORTIONAL HAZARD SURVIVAL ANALYSIS
+
+The following code performs the Cox Proportional Hazard survival analysis.
+
+```{r message=FALSE, warning=FALSE}
+# Create the time and event variables as required in the cox model
+time <- all_vital_clean$Duration
+event <- all_vital_clean$EVENT
+x <- select(all_vital_clean, -c(HADM_ID, Duration, EVENT))
+names(x) <- tolower(names(x))
+
+coxph <- coxph(Surv(time,event) ~ ., data = x)
+summary(coxph)
+```
+
+<p>&nbsp;</p>
+The following code saves the summary of the output of the coxph model with all variables to the results folder.
+
+```{r warning=FALSE, message=FALSE}
+sink(file = 'Results/home_all_vars.txt')
+summary(coxph)
+sink(file=NULL)
+```
+
+<p>&nbsp;</p>
+The following code removes all insignificant variables and then reruns the model.
+```{r}                 
+x <- select(x, -c(ami, cevd, dementia, copd,rheumd, pud, mld, aids,diab,diabwc,
+                  ethnicity_cat, num_reports_cat,heart_cat,oxygen_cat,
+                  diastolic_cat, systolic_cat,resp_cat,gender))
+
+coxph <- coxph(Surv(time,event) ~ ., data = x)
+summary(coxph)
+```
+
+<p>&nbsp;</p>
+The following code saves the summary of the output of the coxph model with significant variables only to the results folder.
+
+```{r warning=FALSE, message=FALSE}
+sink(file = 'Results/home_sig.txt')
+summary(coxph)
+sink(file=NULL)
+```
+
+<p>&nbsp;</p>
+The following code plots the hazard ratio.
+
+```{r fig12, fig.height = 18, fig.width = 10, fig.align = "center", message=FALSE, warning=FALSE}
+ggforest(coxph, data = x, main="Hazard Ratio for Patients Discharged Home", fontsize = 0.7)
+```
+
+<p>&nbsp;</p>
+The following code saves the plot to the Results folder.
+
+```{r}
+tiff(file="Results/plot_hazard_ratio_home.tiff",
+     width=10, height=15, units="in", res=300)
+ggforest(coxph, data = x, main="Hazard Ratio for Patients Discharged Home", fontsize = 0.7)
+dev.off()
+```
+
+### FINDINGS
+  The coef column shows the logarithm of the odds ratio of mortality, and the exp(coef) column shows the odds ratio. A positive coef (or exp(coef) > 1) suggests that the factor is contributing to the mortality, and the larger the absolute value of the coef, the higher the risk of mortality.
+  Based on the results from the coxph model with significant factors only, we have the following major findings:
+  <p>&nbsp;</p>
+  * The concordance score (equivalent to the R2 score in linear regression) is 0.829.
+  * The factor that impacts the mortality rate the most is age. The older the patient, the higher the risk of mortality.
+  * The second strongest factor that impacts the mortality rate is comorbidity of metacanc, which represents metastatic solid tumor. Patients with metastatic solid tumor have a higher risk of mortality.
+  * Patients with msld (moderate or severe liver disease) also have a higher risk of mortality.
+  * Patients admitted through the emergency room have a higher risk of mortality than those admitted through urgent care or other ways.
+  * The longer the hospital length of stay, the higher the risk of mortality.
+  * Marital status and body temperature are significant, but their impact on mortality is relatively minor.
+ 
+<p>&nbsp;</p>  
