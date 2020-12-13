@@ -20,7 +20,7 @@ Because the data sets contain patient personal and health information, it is res
 
 ## Code Outputs
 
-It will output a summary of the survival analysis (Cox Proportional Hazard survival analysis) output before and after removing insignificant variables.
+It will output a summary of the survival analysis (Cox Proportional Hazard survival analysis) output before and after removing insignificant variables, and a Hazard Ratio plot.
 
 These outputs are in the Results folder.
 
@@ -32,15 +32,18 @@ Please read the .html file for the code and its outputs.
 The .html file is in the Markdown Files folder
 The 510_Final_Project.html file is the final version.
 
-## Responses and updates to Peer Review comments:
+## Updates Since Last Submission:
 
-1. The data is de-identified. The date of birth and date of death (if applicable) are masked. There's no other information that can 
-   identify the patient. But nevertheless, the data is restricted.
-2. The inconsistency in subsetting the data by columns is fixed.
-3. About using a training and test set, since this project is to identify factors that impact the mortality and to analyze the effect of 
-   the impact, it is more explanatory than predictive at this point and thus no need to split the data into training and test sets.
-   However, our future work will include a prediction part after investigating more variables such as vital sign data and topic modeling 
-   results from doctor’s notes. In the prediction part, we will split the data into training and test sets.
+  * 1. Focused only on patients who were sent home
+  * 2. Added six vital sign variables to the analysis
+  * 3. Added investigation of missing values and outliers in the vital sign variables
+
+
+## Responses to Peer Review Comments:**
+
+  * 1. The data is de-identified. The date of birth and date of death (if applicable) are masked. There is no other information that can easily identify the patient. Nevertheless, the data is restricted.
+  * 2. The inconsistency in subsetting the data by columns has been fixed.
+  * 3. About training and test sets, since this project is to identify factors that impact the mortality and to analyze the effect of the impact, it is more explanatory than predictive at this point, and thus no need to split the data into training and test sets. However, our future work will include a prediction part after investigating more variables such as topic modeling results from doctor’s notes, which will require splitting the data into training and test sets.
 
 
 
